@@ -36,6 +36,12 @@ OPENAI_CHAT_MODEL_PREFIXES = [
     "gpt-5.6-luna",
     "gpt-5.6-terra",
     "gpt-5.6-sol",
+    #   The o-series is handled throughout this module (see MODELS_WITHOUT_TEMPERATURE
+    #   and MODELS_USING_DEVELOPER_ROLE) but was never listed here, so provides_model
+    #   returned False and o1-preview/o1-mini resolved to no provider at all.
+    "o1",
+    "o3",
+    "o4",
 ]
 
 OPENAI_COMPLETION_MODEL_PREFIXES = [

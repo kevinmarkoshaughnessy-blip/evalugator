@@ -34,7 +34,9 @@ THINKING_MODEL_MIN_MAX_TOKENS = 16000
 _effort: str = "high"
 _logged_effort_calls: set = set()
 
-# DeepSeek only accepts these reasoning_effort values; xhigh/max are capped to "high"
+# The Together SDK types reasoning_effort as Literal["low", "medium", "high"], so
+# xhigh/max are capped to "high". "none" is accepted here but is not an effort value:
+# it is sent as the separate reasoning={"enabled": False} toggle in run_together_chat.
 _TOGETHER_REASONING_EFFORT_VALUES = {"none", "low", "medium", "high"}
 
 
@@ -137,8 +139,14 @@ def run_together_chat(model_id: str, data: dict, with_logprobs=False):
     )
     if with_logprobs:
         kwargs["logprobs"] = 1
-    if reasoning_effort is not None and reasoning_effort != "none":
-        kwargs["reasoning_effort"] = reasoning_effort
+    if reasoning_effort is not None:
+        if reasoning_effort == "none":
+            #   Omitting reasoning_effort does not disable reasoning, it just leaves the
+            #   model on its default, which for a reasoning model means still reasoning.
+            #   The toggle is what actually turns it off.
+            kwargs["reasoning"] = {"enabled": False}
+        else:
+            kwargs["reasoning_effort"] = reasoning_effort
 
     return client.chat.completions.create(**kwargs)
 

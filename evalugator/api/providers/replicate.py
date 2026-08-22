@@ -233,7 +233,43 @@ def replicate_completion_get_probs(model_id, request: GetProbsRequest):
 
 #########################
 #   Chat models
-def messages_to_chat_prompt(messages):
+#   Models whose prompt format is genuinely the Llama-2 one below. Anything else needs
+#   its own chat template: Llama 4 and DeepSeek use entirely different control tokens,
+#   and feeding them [INST]/<<SYS>> markup leaves the model reading literal junk, which
+#   shows up as poor benchmark performance rather than as an error.
+LLAMA2_PROMPT_FORMAT_MODELS = ("llama-2",)
+_warned_prompt_format = set()
+
+
+def messages_to_chat_prompt(messages, model_id=None):
+    """
+    Render a chat prompt for a Replicate-hosted model.
+
+    Prefers the model's own chat template from its HuggingFace tokenizer. Falls back to
+    the Llama-2 format, which is correct only for Llama-2 itself, so the fallback warns
+    for any other model rather than silently sending the wrong markup.
+    """
+    if model_id is not None and not _short_name(model_id).startswith(
+        LLAMA2_PROMPT_FORMAT_MODELS
+    ):
+        try:
+            tokenizer = _get_tokenizer(model_id)
+            if getattr(tokenizer, "chat_template", None):
+                return tokenizer.apply_chat_template(
+                    [{"role": m.role, "content": m.content} for m in messages],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            raise ValueError("tokenizer exposes no chat_template")
+        except Exception as e:
+            if model_id not in _warned_prompt_format:
+                print(
+                    f"Warning: no chat template available for {model_id} ({e}); falling "
+                    "back to the Llama-2 [INST] format, which this model does not use. "
+                    "Results will be degraded until a template is available."
+                )
+                _warned_prompt_format.add(model_id)
+
     #   This function should copy logic from
     #   https://github.com/facebookresearch/llama/blob/a0a4da8b497c566403941ceec47c2512ecf9dd20/llama/generation.py#L284
     #   (except that they assume last message must be from a user, and we don't expect that)
@@ -278,7 +314,7 @@ def messages_to_chat_prompt(messages):
 def replicate_chat_get_text(model_id, request: GetTextRequest):
     data = {
         "model": get_replicate_model(model_id),
-        "prompt": messages_to_chat_prompt(request.prompt),
+        "prompt": messages_to_chat_prompt(request.prompt, model_id),
         "temperature": request.temperature if request.temperature > 0.01 else 0.01,
         #   Q: Why +1?
         #   A: Because this is how we get the expected number of tokens. Probably BOS/EOS thing?
@@ -314,7 +350,7 @@ def replicate_chat_get_probs(model_id, request: GetTextRequest):
         raise ValueError(f"GetProbsRequest for {model_id} requires at least 1 sample")
     data = {
         "model": get_replicate_model(model_id),
-        "prompt": messages_to_chat_prompt(request.prompt),
+        "prompt": messages_to_chat_prompt(request.prompt, model_id),
         "temperature": 1,
         #   Q: Why +1?
         #   A: Because this is how we get the expected number of tokens. Probably BOS/EOS thing?

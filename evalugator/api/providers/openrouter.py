@@ -56,9 +56,11 @@ OPENROUTER_BUDGET_EFFORT_MAP: dict[str, str] = {
 }
 
 #   Adaptive thinking: effort → reasoning.effort sent to OpenRouter.
-#   Mirrors EFFORT_TO_OUTPUT_CONFIG in anthropic.py; "medium" has no adaptive equivalent.
+#   Mirrors EFFORT_TO_OUTPUT_CONFIG in anthropic.py, "medium" included: omitting it
+#   made --effort medium raise mid-run even though set_effort accepts that level.
 OPENROUTER_ADAPTIVE_EFFORT_MAP: dict[str, str] = {
     "low": "low",
+    "medium": "medium",
     "high": "high",
     "xhigh": "xhigh",
     "max": "max",
@@ -76,6 +78,7 @@ OPENROUTER_BUDGET_MIN_TOKENS: dict[str, int] = {
 #   Min max_tokens for adaptive thinking (mirrors EFFORT_TO_ADAPTIVE_MIN_TOKENS in anthropic.py).
 OPENROUTER_ADAPTIVE_MIN_TOKENS: dict[str, int] = {
     "low": 2048,
+    "medium": 3072,
     "high": 4096,
     "xhigh": 8192,
     "max": 16384,
@@ -91,6 +94,11 @@ OPENROUTER_NATIVE_REASONING_MODELS = {
     "moonshotai/kimi-k3",
     "z-ai/glm-5.2",
     "x-ai/grok-4.5",
+    "x-ai/grok-4.6",
+    #   Same family as thinkingmachines/Inkling, which is registered in the Together
+    #   provider's THINKING_MODELS after it returned nothing but empty strings: the
+    #   reasoning trace consumed the whole token budget before any response was written.
+    "thinkingmachines/inkling-small",
 }
 OPENROUTER_NATIVE_REASONING_MIN_TOKENS = 8192
 
@@ -169,7 +177,10 @@ def openrouter_chat_get_text(model_id: str, request: GetTextRequest) -> GetTextR
 
     if _effort != "none" and model_id in OPENROUTER_BUDGET_THINKING_MODELS:
         reasoning_effort = OPENROUTER_BUDGET_EFFORT_MAP[_effort]
-        data["reasoning"] = {"effort": reasoning_effort}
+        #   `reasoning` is an OpenRouter extension, not part of the OpenAI schema, so it
+        #   has to travel in extra_body. Passing it as a top-level kwarg raises
+        #   TypeError: Completions.create() got an unexpected keyword argument 'reasoning'.
+        data["extra_body"] = {"reasoning": {"effort": reasoning_effort}}
         data["temperature"] = 1  # required by Anthropic API when thinking is enabled
         data["max_tokens"] = max(request.max_tokens, OPENROUTER_BUDGET_MIN_TOKENS[_effort])
         log_key = (model_id, _effort)
@@ -192,7 +203,8 @@ def openrouter_chat_get_text(model_id: str, request: GetTextRequest) -> GetTextR
             )
         reasoning_effort = OPENROUTER_ADAPTIVE_EFFORT_MAP[_effort]
         min_tokens = OPENROUTER_ADAPTIVE_MIN_TOKENS[_effort]
-        data["reasoning"] = {"effort": reasoning_effort}
+        #   see note above: OpenRouter extensions must go through extra_body
+        data["extra_body"] = {"reasoning": {"effort": reasoning_effort}}
         data["max_tokens"] = max(request.max_tokens, min_tokens)
         # temperature omitted: not supported for Opus 4.7/4.8 and must be 1 for Sonnet 4.6 with thinking
         log_key = (model_id, _effort)

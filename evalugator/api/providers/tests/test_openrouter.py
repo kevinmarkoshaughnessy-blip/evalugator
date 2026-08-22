@@ -106,7 +106,7 @@ def test_budget_thinking_high_effort(openrouter_echo_requests, reset_effort):
     openrouter.set_effort("high")
     response = Api("openrouter/anthropic/claude-haiku-4-5").execute(TEXT_REQUEST_SMALL_TOKENS).result()
     kwargs = json.loads(response.raw_responses[0]._echo)
-    assert kwargs["reasoning"] == {"effort": "high"}
+    assert kwargs["extra_body"]["reasoning"] == {"effort": "high"}
     assert kwargs["temperature"] == 1  # forced to 1 when thinking is enabled
     assert kwargs["max_tokens"] >= 11024  # min for high effort budget thinking
 
@@ -115,7 +115,7 @@ def test_budget_thinking_low_effort(openrouter_echo_requests, reset_effort):
     openrouter.set_effort("low")
     response = Api("openrouter/anthropic/claude-haiku-4-5").execute(TEXT_REQUEST_1).result()
     kwargs = json.loads(response.raw_responses[0]._echo)
-    assert kwargs["reasoning"] == {"effort": "low"}
+    assert kwargs["extra_body"]["reasoning"] == {"effort": "low"}
     assert kwargs["temperature"] == 1
     assert kwargs["max_tokens"] >= 2048
 
@@ -125,14 +125,14 @@ def test_budget_thinking_xhigh_caps_to_high(openrouter_echo_requests, reset_effo
     response = Api("openrouter/anthropic/claude-haiku-4-5").execute(TEXT_REQUEST_SMALL_TOKENS).result()
     kwargs = json.loads(response.raw_responses[0]._echo)
     # xhigh has no higher budget tier for Haiku 4.5, so it caps to "high"
-    assert kwargs["reasoning"] == {"effort": "high"}
+    assert kwargs["extra_body"]["reasoning"] == {"effort": "high"}
 
 
 def test_adaptive_thinking_high_effort(openrouter_echo_requests, reset_effort):
     openrouter.set_effort("high")
     response = Api("openrouter/anthropic/claude-sonnet-4-6").execute(TEXT_REQUEST_SMALL_TOKENS).result()
     kwargs = json.loads(response.raw_responses[0]._echo)
-    assert kwargs["reasoning"] == {"effort": "high"}
+    assert kwargs["extra_body"]["reasoning"] == {"effort": "high"}
     assert "temperature" not in kwargs  # omitted for adaptive thinking
     assert kwargs["max_tokens"] >= 4096  # OPENROUTER_ADAPTIVE_MIN_TOKENS["high"]
 
@@ -141,7 +141,7 @@ def test_adaptive_thinking_max_effort(openrouter_echo_requests, reset_effort):
     openrouter.set_effort("max")
     response = Api("openrouter/anthropic/claude-sonnet-4-6").execute(TEXT_REQUEST_SMALL_TOKENS).result()
     kwargs = json.loads(response.raw_responses[0]._echo)
-    assert kwargs["reasoning"] == {"effort": "max"}
+    assert kwargs["extra_body"]["reasoning"] == {"effort": "max"}
     assert kwargs["max_tokens"] >= 16384  # OPENROUTER_ADAPTIVE_MIN_TOKENS["max"]
 
 
@@ -149,7 +149,7 @@ def test_adaptive_thinking_xhigh_on_opus(openrouter_echo_requests, reset_effort)
     openrouter.set_effort("xhigh")
     response = Api("openrouter/anthropic/claude-opus-4-7").execute(TEXT_REQUEST_SMALL_TOKENS).result()
     kwargs = json.loads(response.raw_responses[0]._echo)
-    assert kwargs["reasoning"] == {"effort": "xhigh"}
+    assert kwargs["extra_body"]["reasoning"] == {"effort": "xhigh"}
     assert kwargs["max_tokens"] >= 8192
 
 
@@ -159,10 +159,16 @@ def test_adaptive_thinking_xhigh_rejected_on_sonnet(openrouter_echo_requests, re
         Api("openrouter/anthropic/claude-sonnet-4-6").execute(TEXT_REQUEST_1).result()
 
 
-def test_adaptive_thinking_medium_rejected(openrouter_echo_requests, reset_effort):
+def test_adaptive_thinking_medium_is_supported(openrouter_echo_requests, reset_effort):
+    """
+    output_config.effort accepts medium, so --effort medium must reach the model rather
+    than raising. It previously raised, which aborted any mixed-provider run using it.
+    """
     openrouter.set_effort("medium")
-    with pytest.raises(ValueError, match="medium"):
-        Api("openrouter/anthropic/claude-sonnet-4-6").execute(TEXT_REQUEST_1).result()
+    response = Api("openrouter/anthropic/claude-sonnet-4-6").execute(TEXT_REQUEST_SMALL_TOKENS).result()
+    kwargs = json.loads(response.raw_responses[0]._echo)
+    assert kwargs["extra_body"]["reasoning"] == {"effort": "medium"}
+    assert kwargs["max_tokens"] >= 3072  # OPENROUTER_ADAPTIVE_MIN_TOKENS["medium"]
 
 
 def test_no_reasoning_when_effort_none(openrouter_echo_requests, reset_effort):
@@ -182,3 +188,40 @@ def test_non_reasoning_model_unaffected(openrouter_echo_requests, reset_effort):
     assert "reasoning" not in kwargs
     assert kwargs["temperature"] == 1
     assert kwargs["max_tokens"] == 66
+
+
+def _bind_to_real_sdk(kwargs):
+    """
+    Bind kwargs against the real OpenAI SDK signature without calling it.
+
+    The tests above mock chat.completions.create, and a mock accepts any keyword, so
+    they cannot detect a parameter the SDK does not have. That is how `reasoning=...`
+    survived: it type-checked against a mock and raised
+    `TypeError: Completions.create() got an unexpected keyword argument 'reasoning'`
+    against the real client. Provider-specific extensions must go via extra_body.
+    """
+    import inspect
+
+    import openai
+
+    client = openai.OpenAI(api_key="dummy", base_url=openrouter.OPENROUTER_BASE_URL)
+    inspect.signature(client.chat.completions.create).bind(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "model,effort",
+    [
+        ("openrouter/anthropic/claude-haiku-4-5", "high"),      # budget thinking
+        ("openrouter/anthropic/claude-sonnet-4-6", "medium"),   # adaptive thinking
+        ("openrouter/anthropic/claude-opus-4-7", "xhigh"),      # adaptive, xhigh tier
+        ("openrouter/moonshotai/kimi-k3", "high"),              # native reasoning
+        ("openrouter/anthropic/claude-3.5-sonnet", "none"),     # no reasoning at all
+    ],
+)
+def test_request_is_accepted_by_the_real_sdk_signature(
+    openrouter_echo_requests, reset_effort, model, effort
+):
+    openrouter.set_effort(effort)
+    response = Api(model).execute(TEXT_REQUEST_SMALL_TOKENS).result()
+    kwargs = json.loads(response.raw_responses[0]._echo)
+    _bind_to_real_sdk(kwargs)

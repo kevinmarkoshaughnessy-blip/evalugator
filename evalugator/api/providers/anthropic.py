@@ -85,9 +85,12 @@ EFFORT_TO_BUDGET_TOKENS: dict[str, int] = {
 }
 
 # Effort level → output_config.effort for adaptive thinking models (Sonnet 4.6+, Opus 4.6+)
-# "medium" is excluded — it has no equivalent output_config level
+# output_config.effort accepts low/medium/high/max, plus xhigh on Opus 4.7 and later.
+# "medium" was previously omitted here, which made --effort medium raise mid-run for
+# every adaptive model even though set_effort accepts it.
 EFFORT_TO_OUTPUT_CONFIG: dict[str, str] = {
     "low": "low",
+    "medium": "medium",
     "high": "high",
     "xhigh": "xhigh",
     "max": "max",
@@ -97,6 +100,7 @@ EFFORT_TO_OUTPUT_CONFIG: dict[str, str] = {
 # and thinking consumes tokens before the text response can be written
 EFFORT_TO_ADAPTIVE_MIN_TOKENS: dict[str, int] = {
     "low": 2048,
+    "medium": 3072,
     "high": 4096,
     "xhigh": 8192,
     "max": 16384,
