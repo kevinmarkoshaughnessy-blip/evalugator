@@ -1,5 +1,10 @@
 # evalugator
 
+This is a new version of evalugator with enhancements to support SADv2. A PR is outstanding for merging into the original repo. 
+
+Zenodo DOI
+[![DOI](https://zenodo.org/badge/1262651018.svg)](https://doi.org/10.5281/zenodo.22638344)
+
 ![DALL·E 2023-10-17 12 05 22 - Illustration of a cartoonish alligator wearing reading glasses, using its tail to mark answers on a multiple-choice exam, with a determined expression](https://github.com/LRudL/evalugator/assets/55555739/cff6d198-a3db-42eb-9b0a-257585cdc5be)
 
 
